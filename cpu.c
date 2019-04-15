@@ -26,7 +26,7 @@ void dump_registers ()
   printf ("IR=(%d,%d), ", CPU.IRopcode, CPU.IRoperand);
   printf ("AC="mdOutFormat", ", CPU.AC);
   printf ("MBR="mdOutFormat"\n", CPU.MBR);
-  printf ("          Status=%d, ", CPU.exeStatus);
+  printf ("exeStatus=%d, ", CPU.exeStatus);
   printf ("IV=%x, ", CPU.interruptV);
   printf ("PT=%x, ", CPU.PTptr);
   printf ("cycle=%d\n", CPU.numCycles);
@@ -36,7 +36,7 @@ void set_interrupt (unsigned bit)
 { CPU.interruptV = CPU.interruptV | bit; }
 
 void clear_interrupt (unsigned bit)
-{ 
+{
   unsigned negbit = -bit - 1;
   printf ("IV is %x, ", CPU.interruptV);
   CPU.interruptV = CPU.interruptV & negbit;
@@ -45,12 +45,12 @@ void clear_interrupt (unsigned bit)
 
 void handle_interrupt ()
 {
-  if (Debug) 
+  if (Debug)
     printf ("Interrupt handler: pid = %d; interrupt = %x; exeStatus = %d\n",
-            CPU.Pid, CPU.interruptV, CPU.exeStatus); 
+            CPU.Pid, CPU.interruptV, CPU.exeStatus);
   while (CPU.interruptV != 0)
   { if ((CPU.interruptV & endWaitInterrupt) == endWaitInterrupt)
-    { endWait_moveto_ready ();  
+    { endWait_moveto_ready ();
       // interrupt may overwrite, move all IO done processes (maybe > 1)
       clear_interrupt (endWaitInterrupt);
     }
@@ -58,7 +58,7 @@ void handle_interrupt ()
     { if (CPU.exeStatus == eRun) CPU.exeStatus = eReady;
       clear_interrupt (tqInterrupt);
     }
-    // *** ADD CODE to handle page fault and periodical age scan
+    // *** ADD CODE to handle page fault and periodical age scan // For DemandPaging
   }
 }
 
@@ -72,7 +72,7 @@ void fetch_instruction ()
        // also exclude OPstore, which stores data, not gets data
     if (CPU.IRopcode != OPend && CPU.IRopcode != OPsleep
         && CPU.IRopcode != OPstore)
-    { mret = get_data (CPU.IRoperand); 
+    { mret = get_data (CPU.IRoperand);
       if (mret == mError) CPU.exeStatus = eError;
       else if (mret == mPFault) CPU.exeStatus = ePFault;
       else if (CPU.IRopcode == OPifgo)
@@ -89,27 +89,61 @@ void fetch_instruction ()
 }       // ****** if there is page fault, PC will not be incremented
 
 void execute_instruction ()
-{ int gotoaddr, mret;
+{
+  int gotoaddr, mret;
+  float sum, temp;
+  char str[32];
+
 
   switch (CPU.IRopcode)
   { case OPload:
-      // *** ADD CODE for the instruction
+      // *** ADD CODE for the instruction // DONE
+      CPU.AC = CPU.MBR;
+      CPU.exeStatus =  eRun;
+	  break;
     case OPadd:
-      // *** ADD CODE for the instruction
+      // *** ADD CODE for the instruction // DONE
+      CPU.AC = CPU.AC + CPU.MBR;
+      CPU.exeStatus =  eRun;
+	  break;
     case OPmul:
-      // *** ADD CODE for the instruction
-    case OPifgo:  
-      // *** ADD CODE for the instruction
+      // *** ADD CODE for the instruction // DONE
+      temp = CPU.MBR;
+      sum = 0;
+      while (temp > 0) {
+        sum = sum+temp;
+        temp = temp-1;
+      }
+      CPU.AC = CPU.AC + sum;
+      CPU.exeStatus =  eRun;
+	  break;
+    case OPifgo:
+      // *** ADD CODE for the instruction // DONE
+      if (CPU.MBR > 0){
+        CPU.PC = CPU.IRoperand - 1;
+      }
+      CPU.exeStatus =  eRun;
+	  break;
     case OPstore:
-      // *** ADD CODE for the instruction
+      // *** ADD CODE for the instruction // DONE
+      put_data (CPU.IRoperand);
+      CPU.exeStatus =  eRun;
+	  break;
     case OPprint:
-      // *** ADD CODE for the instruction
+      // *** ADD CODE for the instruction // DONE
+      sprintf (str, "%.2f", CPU.MBR);
+      insert_termio (CPU.Pid, str, regularIO);
+      CPU.exeStatus =  eRun;
+	  break;
     case OPsleep:
-      // *** ADD CODE for the instruction
-      CPU.exeStatus = eWait; break;
+      // *** ADD CODE for the instruction // DONE
+      add_timer (CPU.IRoperand, CPU.Pid, actReadyInterrupt, oneTimeTimer);
+      CPU.exeStatus = eWait;
+      break;
     case OPend:
-      // *** ADD CODE for the instruction
-      CPU.exeStatus = eEnd; break;
+      // *** ADD CODE for the instruction // DONE
+      CPU.exeStatus = eEnd;
+      break;
     default:
       printf ("Illegitimate OPcode in process %d\n", CPU.Pid);
       CPU.exeStatus = eError;

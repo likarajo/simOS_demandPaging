@@ -11,13 +11,22 @@ int numUserProcess = 0;
 //============================================
 // context switch, switch in or out a process pid
 
-void context_in (int pid)
-{ 
+void context_in (int pid)  // DONE
+{ CPU.Pid = pid;
+  CPU.PC = PCB[pid]->PC;
+  CPU.AC = PCB[pid]->AC;
+  CPU.PTptr = PCB[pid]->PTptr;
+  CPU.numInstr = PCB[pid]->numInstr;
+  CPU.numData = PCB[pid]->numData;
+  CPU.dataOffset = PCB[pid]->dataOffset;
+  CPU.exeStatus = PCB[pid]->exeStatus;
   // *** ADD CODE to switch in the context from PCB to CPU
 }
 
-void context_out (int pid, int intime)
-{  
+void context_out (int pid, int intime) // DONE
+{ PCB[pid]->PC = CPU.PC;
+  PCB[pid]->AC = CPU.AC;
+  PCB[pid]->exeStatus = CPU.exeStatus;
   // *** ADD CODE to switch out the context from CPU to PCB
 }
 
@@ -59,7 +68,7 @@ int get_ready_process ()
 
   if (readyHead == NULL)
   { printf ("No ready process now!!!\n");
-    return (nullReady); 
+    return (nullReady);
   }
   else
   { pid = readyHead->pid;
@@ -142,7 +151,7 @@ void dump_endWait_list ()
 }
 
 //=========================================================================
-// Some support functions for PCB 
+// Some support functions for PCB
 // PCB related definitions are in simos.h
 //=========================================================================
 
@@ -160,6 +169,7 @@ int new_PCB ()
   }
   PCB[pid] = (typePCB *) malloc ( sizeof(typePCB) );
   PCB[pid]->Pid = pid;
+  insert_ready_process(pid);
   return (pid);
 }
 
@@ -214,7 +224,7 @@ void clean_process (int pid)
 {
   free_process_memory (pid);
   free_PCB (pid);  // PCB has to be freed last, other frees use PCB info
-} 
+}
 
 void end_process (int pid)
 { PCB[pid]->exeStatus = CPU.exeStatus;
@@ -223,9 +233,9 @@ void end_process (int pid)
   // send end process print msg to terminal, str will be freed by terminal
   char *str = (char *) malloc (80);
   if (CPU.exeStatus == eError)
-  { printf ("\aProcess %d has an error, dumping its states\n", pid);
+  { printf ("Process %d has an error, dumping its states\n", pid);
     dump_PCB (pid);
-    dump_process_memory (pid); 
+    dump_process_memory (pid);
     sprintf (str, "Process %d had encountered error in execution!!!\n", pid);
   }
   else  // was eEnd
@@ -239,13 +249,13 @@ void end_process (int pid)
   // invoke io to print str, process has terminated, so no wait state
 
   numUserProcess--;
-  clean_process (pid); 
+  clean_process (pid);
     // cpu will clean up process pid without waiting for printing to finish
     // so, io should not access PCB[pid] for end process printing
 }
 
 void init_idle_process ()
-{ 
+{
   // create and initialize PCB for the idle process
   PCB[idlePid] = (typePCB *) malloc ( sizeof(typePCB) );
 
@@ -267,7 +277,7 @@ void initialize_process_manager ()
   sem_init (&pmutex, 0, 1);
 }
 
-// submit_process always working on a new pid and the new pid will not be 
+// submit_process always working on a new pid and the new pid will not be
 // used by anyone else till submit_process finishes working on it
 // currentPid is not used by anyone else but the dump functions
 // So, no conflict for PCB and Pid related data
@@ -276,7 +286,6 @@ void initialize_process_manager ()
 
 int submit_process (char *fname)
 { int pid, ret, i;
-
   if ( ((numFrames-OSpages)/(numUserProcess+1)) < 2 )
     printf ("\aToo many processes => they may not execute due to page faults\n");
   else
@@ -301,19 +310,33 @@ int submit_process (char *fname)
   return (-1);
 }
 
-void execute_process ()
+void execute_process () // CHECK
 { int pid, intime;
   genericPtr event;
 
+  //dump_endWait_list();
+  //dump_ready_queue ();
+
   pid = get_ready_process ();
   if (pid != nullReady)
-  { 
+  {
     // *** ADD CODE to perform context switch and call cpu_execution
     // also add code to keep track of accounting info: timeUsed & numPF
-
-    if (CPU.exeStatus == eReady) insert_ready_process (pid);
-    else if (CPU.exeStatus == ePFault || CPU.exeStatus == eWait) 
+	context_in (pid);
+    CPU.exeStatus = eRun;
+    event = add_timer (cpuQuantum, CPU.Pid, actTQinterrupt, oneTimeTimer); ///add timer
+    cpu_execution (); 
+	
+    if (CPU.exeStatus == eReady)
+      { context_out (pid,0);
+        insert_ready_process (pid);
+      }
+    else if (CPU.exeStatus == ePFault || CPU.exeStatus == eWait) {
       deactivate_timer (event);
+	  dump_PCB(pid);
+	  context_out(pid,0);
+	  dump_PCB(pid);
+	}
     else // CPU.exeStatus == eError or eEnd
       { end_process (pid); deactivate_timer (event); }
     // ePFault and eWait has to be handled differently

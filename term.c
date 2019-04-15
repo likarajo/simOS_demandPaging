@@ -64,6 +64,8 @@ int pid, type;
 char *outstr;
 { TermQnode *node;
 
+  sem_wait(&term_mutex);
+  
   if (Debug) printf ("Insert term queue %d %s\n", pid, outstr);
   node = (TermQnode *) malloc (sizeof (TermQnode));
   node->pid = pid;
@@ -75,6 +77,8 @@ char *outstr;
   else // insert to tail
   { termQtail->next = node; termQtail = node; }
   if (Debug) dump_termio_queue ();
+  sem_post(&term_semaq);
+  sem_post(&term_mutex);
 }
 
 // remove the termIO job from queue and call terminal_output for printing
@@ -82,9 +86,12 @@ char *outstr;
 void handle_one_termio ()
 { TermQnode *node;
 
+  sem_wait(&term_semaq);
+  sem_wait(&term_mutex);
+
   if (Debug) dump_termio_queue ();
   if (termQhead == NULL)
-    printf ("No process in terminal queue!!!\n");
+  { printf ("No process in terminal queue!!!\n"); sem_post(&term_mutex); sem_post(&term_semaq);}
   else 
   { node = termQhead;
     terminal_output (node->pid, node->str);
@@ -98,6 +105,8 @@ void handle_one_termio ()
     if (termQhead == NULL) termQtail = NULL;
     free (node->str); free (node);
     if (Debug) dump_termio_queue ();
+	sem_post(&term_semaq); sem_post(&term_mutex);
+	if (termQhead == NULL) sem_wait(&term_semaq);
   }
 }
 
@@ -128,6 +137,9 @@ pthread_t termThread;
 
 void start_terminal ()
 { int ret;
+  sem_init(&term_semaq,0,1);
+  sem_init(&term_mutex,0,1);
+  sem_wait(&term_semaq);
 
   fterm = fopen (termFN, "w");
   ret = pthread_create (&termThread, NULL, termIO, NULL);

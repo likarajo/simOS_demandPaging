@@ -58,7 +58,7 @@ void dump_process_swap (int pid)
 }
 
 // open the file with the swap space size, initialize content to 0
-initialize_swap_space ()
+void initialize_swap_space ()
 { int ret, i, j, k;
   int buf[pageSize];
 

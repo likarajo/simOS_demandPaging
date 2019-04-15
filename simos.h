@@ -34,7 +34,7 @@ int periodAgeScan; // the period for scanning and shifting the age vectors
 int termPrintTime;   // simulated time (sleep) for terminal to output a string
 int diskRWtime;   // simulated time (sleep) for disk IO (a page)
 
-//=============== memory.c related definitions ====================
+//=============== paging.c related definitions ====================
 
 // memory data type defintion, could be int or float
 //typedef int mdType; 
@@ -53,24 +53,36 @@ typedef union     // type definition for memory (its content)
 #define mError -1
 #define mPFault 0
 
+mType *Memory;
+
 // memory read/write function definitions
 
 int get_data (int offset); 
 int put_data (int offset);
 int get_instruction (int offset);
-  // only cpu.c for the above 3 functions
+  // only cpu.c uses the above 3 functions
+void direct_put_instruction (int findex, int offset, int instr);
+void direct_put_data (int findex, int offset, mdType data);
+  // only loader.c uses the above 2 functions
+void  update_frame_info (int findex, int pid, int page);
+  // loader.c and paging.c uses the above function
 
-// basic memory functions
-void initialize_memory_manager ();  // called by system.c
+  // process related memory functions
+void init_process_pagetable (int pid);
+void update_process_pagetable (int pid, int page, int frame);
+int free_process_memory (int pid);
+void dump_process_pagetable (int pid);
 void dump_process_memory (int pid);
+
 void dump_memory ();
+void dump_free_list ();
+void dump_memoryframe_info ();
 
-// memory management functions
+  // interrupt handling functions, called by cpu.c
+void page_fault_handler ();
+void memory_agescan (); 
 
-int allocate_memory (int pid, int msize, int numinstr);
-int free_memory (int pid);  // only called by process.c 
-
-void memory_agescan ();  // called by cpu.c after age scan interrupt
+void initialize_memory_manager ();   // called by system.c
 
 
 //================= cpu.c related definitions ======================
@@ -80,6 +92,10 @@ void memory_agescan ();  // called by cpu.c after age scan interrupt
 struct
 { int Pid;
   int PC;
+  int numInstr; // added
+  int numData; // added
+  int dataOffset; // added
+  int Mbound; // added
   mdType AC;
   mdType MBR;
   int IRopcode;
@@ -114,7 +130,7 @@ struct
 void initialize_cpu ();  // called by system.c
 void cpu_execution ();   // called by process.c
 
-void set_interrupt (unsigned bit);  
+void set_interrupt (unsigned bit);
      // called by clock.c for tqInterrup, memory.c  for ageInterrupt
      // called by clock.c for endWaitInterrupt (sleep)
      // called by term.c for endWaitInterrupt (termio)
@@ -126,6 +142,10 @@ void set_interrupt (unsigned bit);
 typedef struct
 { int Pid;
   int PC;
+  int numInstr; // added
+  int numData; // added
+  int dataOffset; // added
+  int Mbound; // added
   mdType AC;
   int *PTptr;
   int exeStatus;
@@ -226,6 +246,7 @@ void start_client_submission ();
 void end_client_submission ();
 void one_submission ();
 int load_process (int pid, char *fname);
+void load_idle_process ();
 
 // return status of loader, whether the program being loaded is correct
 #define progError -1

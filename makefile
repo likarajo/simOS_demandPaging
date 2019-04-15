@@ -3,7 +3,7 @@ final: simos.exe
 simos.exe: system.o admin.o submit.o process.o cpu.o\
            loader.o paging.o swap.o term.o clock.o
 	gcc -g -o simos.exe system.o admin.o submit.o process.o cpu.o\
-               paging.o loader.o swap.o term.o clock.o -lpthread
+               paging.o loader.o swap.o term.o clock.o -lpthread -lm
 
 system.o: system.c simos.h
 	gcc -g -c system.c
