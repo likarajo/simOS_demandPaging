@@ -16,10 +16,9 @@ void context_in (int pid)  // DONE
   CPU.PC = PCB[pid]->PC;
   CPU.AC = PCB[pid]->AC;
   CPU.PTptr = PCB[pid]->PTptr;
-  CPU.numInstr = PCB[pid]->numInstr;
-  CPU.numData = PCB[pid]->numData;
   CPU.dataOffset = PCB[pid]->dataOffset;
   CPU.exeStatus = PCB[pid]->exeStatus;
+  PCB[pid]->timeUsed = CPU.numCycles - PCB[pid]->timeUsed; //**DG
   // *** ADD CODE to switch in the context from PCB to CPU
 }
 
@@ -27,6 +26,8 @@ void context_out (int pid, int intime) // DONE
 { PCB[pid]->PC = CPU.PC;
   PCB[pid]->AC = CPU.AC;
   PCB[pid]->exeStatus = CPU.exeStatus;
+  PCB[pid]->PTptr = CPU.PTptr;
+  PCB[pid]->timeUsed = CPU.numCycles - PCB[pid]->timeUsed; //**DG
   // *** ADD CODE to switch out the context from CPU to PCB
 }
 
@@ -187,7 +188,9 @@ void dump_PCB (int pid)
   printf ("PC = %d\n", PCB[pid]->PC);
   printf ("AC = "mdOutFormat"\n", PCB[pid]->AC);
   printf ("PTptr = %x\n", PCB[pid]->PTptr);
-  printf ("exeStatus = %d\n", PCB[pid]->exeStatus);
+  printf ("exeStatus = %d\n\n", PCB[pid]->exeStatus);
+  
+  dump_process_pagetable(pid);
 }
 
 void dump_PCB_list ()
@@ -239,7 +242,8 @@ void end_process (int pid)
     sprintf (str, "Process %d had encountered error in execution!!!\n", pid);
   }
   else  // was eEnd
-  { printf ("Process %d had completed successfully: Time=%d, PF=%d\n",
+  { PCB[pid]->timeUsed = CPU.numCycles - PCB[pid]->timeUsed; //**DG
+    printf ("Process %d had completed successfully: Time=%d, PF=%d\n",
              pid, PCB[pid]->timeUsed, PCB[pid]->numPF);
     sprintf (str, "Process %d had completed successfully: Time=%d, PF=%d\n",
              pid, PCB[pid]->timeUsed, PCB[pid]->numPF);
@@ -296,6 +300,8 @@ int submit_process (char *fname)
       { PCB[pid]->PC = 0;
         PCB[pid]->AC = 0;
         PCB[pid]->exeStatus = eReady;
+	    PCB[pid]->numPF=0;
+	    PCB[pid]->timeUsed=0;
         // swap manager will put the process to ready queue
         numUserProcess++;
         return (pid);
@@ -312,7 +318,7 @@ int submit_process (char *fname)
 
 void execute_process () // CHECK
 { int pid, intime;
-  genericPtr event;
+  genericPtr event, idleEvent, ageCheck;
 
   //dump_endWait_list();
   //dump_ready_queue ();
@@ -323,9 +329,10 @@ void execute_process () // CHECK
     // *** ADD CODE to perform context switch and call cpu_execution
     // also add code to keep track of accounting info: timeUsed & numPF
 	context_in (pid);
-    CPU.exeStatus = eRun;
+    CPU.exeStatus = eRun; //printf("testing PID: %d\n", CPU.Pid);
     event = add_timer (cpuQuantum, CPU.Pid, actTQinterrupt, oneTimeTimer); ///add timer
-    cpu_execution (); 
+    //ageCheck = add_timer (periodAgeScan, CPU.Pid, ageInterrupt, periodAgeScan);
+	cpu_execution (); 
 	
     if (CPU.exeStatus == eReady)
       { context_out (pid,0);
@@ -333,12 +340,10 @@ void execute_process () // CHECK
       }
     else if (CPU.exeStatus == ePFault || CPU.exeStatus == eWait) {
       deactivate_timer (event);
-	  dump_PCB(pid);
 	  context_out(pid,0);
-	  dump_PCB(pid);
 	}
     else // CPU.exeStatus == eError or eEnd
-      { end_process (pid); deactivate_timer (event); }
+      { end_process (pid); deactivate_timer (event);  }
     // ePFault and eWait has to be handled differently
     // in ePFfault, interrupt is set and memory handles the interrupt
     // in eWait, CPU directly execute IO libraries and initiate IO
@@ -356,8 +361,11 @@ void execute_process () // CHECK
        // only time quantum will stop idle process, and shoud use idleQuantum
   { context_in (idlePid);
     CPU.exeStatus = eRun;
-    add_timer (idleQuantum, CPU.Pid, actTQinterrupt, oneTimeTimer);
+    idleEvent = add_timer (idleQuantum, CPU.Pid, actTQinterrupt, oneTimeTimer);
+	//ageCheck = add_timer (periodAgeScan, CPU.Pid, ageInterrupt, periodAgeScan);
     cpu_execution (); 
+	if (CPU.exeStatus != eReady) {deactivate_timer (idleEvent);} //don't want idleProcess in readyQueue
+	//deactivate_timer(ageCheck);
   }
 }
 

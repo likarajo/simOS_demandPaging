@@ -82,40 +82,46 @@ int calculate_memory_address (unsigned offset, int rwflag) // DONE
   if(offset == 0){
     pageIndex = 0;
   } else {
-    pageIndex = offset / pageSize + 1; //shouldn't add 1
+    pageIndex = offset / pageSize; //removed the add 1; was making the process read the wrong page
   }
 
-   if(pageIndex >= maxPpages){
+   if((pageIndex >= maxPpages) || (pageIndex<0)){
     return mError; // memory access violation
    }
 
    int frame = CPU.PTptr[pageIndex];
-   if(frame == nullPage){
-    return mError; //access violation
+   if((frame == nullPage) && (rwflag == flagRead)){ //if trying to read beyond mbound, error; if trying to write, ok
+     return mError; //access violation
    } else if (frame == diskPage){
-    if(rwflag == flagRead){
-        set_interrupt(pFaultException);
-        return mPFault;
-    } else if(rwflag == flagWrite){
+	if((rwflag == flagRead) || (rwflag == flagWrite)){ //either read or writee, need page to know other values in page 
+		set_interrupt(pFaultException);
+		return mPFault;
+   //} else if(rwflag == flagWrite){
            //swap ??
-    } else {
-        return mError;
-    }
-  } else if (frame == pendingPage) {
-    return -1;
+	} else {
+       return mError;
+	}
+   } else if (frame == pendingPage) {
+    return mPFault;
    	//break;
-  } else {
+   } else {
+	if ((frame == nullPage) && (rwflag == flagWrite)) { //trying to write to new memory location
+		frame = get_free_frame();
+		update_frame_info (frame, CPU.Pid, pageIndex);
+		update_process_pagetable (CPU.Pid, pageIndex, frame);
+	}
     int memOffset = frame * pageSize;
    	int pageOffset = offset - pageIndex * pageSize;
    	int address = memOffset + pageOffset;
 
    	// set age and dirty fields
-   	memFrame[frame].dirty = dirtyFrame;
-    memFrame[frame].age = zeroAge; //should be zeroAge or highest age: used age constants
+	if (rwflag=flagWrite) { //if memory is changed
+		memFrame[frame].dirty = dirtyFrame;
+	}
+    memFrame[frame].age = highestAge; //should be zeroAge or highest age: used age constants
 
    	return address;
   }
-
 }
 
 int get_data (int offset) // DONE
@@ -123,10 +129,9 @@ int get_data (int offset) // DONE
   // call calculate_memory_address to get memory address
   // copy the memory content to MBR
   // return mNormal, mPFault or mError
-
   int address = calculate_memory_address(CPU.dataOffset + offset, flagRead);
 
-  if (address == mError){
+  if (address == mError){ //printf("address: %d\n", CPU.dataOffset + offset); bugtesting code
     return mError;
   } else if (address == mPFault){
     return mPFault;
@@ -142,7 +147,6 @@ int put_data (int offset) // DONE
   // call calculate_memory_address to get memory address
   // copy MBR to memory
   // return mNormal, mPFault or mError
-
   int address = calculate_memory_address(CPU.dataOffset + offset, flagWrite);
 
   if (address == mError){
@@ -152,6 +156,7 @@ int put_data (int offset) // DONE
   } else {
     Memory[address].mData = CPU.MBR;
 
+	memFrame[address/pageSize].dirty = dirtyFrame;
     return mNormal;
   }
 
@@ -162,7 +167,6 @@ int get_instruction (int offset) // DONE
   // call calculate_memory_address to get memory address
   // convert memory content to opcode and operand
   // return mNormal, mPFault or mError
-
   int address = calculate_memory_address(offset, flagRead);
 
   if (address == mError){
@@ -182,16 +186,16 @@ int get_instruction (int offset) // DONE
 // no specific protection check is done
 void direct_put_instruction (int findex, int offset, int instr)
 { int addr = (offset & pageoffsetMask) | (findex << pagenumShift);
-  //printf("Address stuff: 0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x\n", offset, pageoffsetMask, findex, pagenumShift,(offset & pageoffsetMask), (findex << pagenumShift));
+  //printf("Address stuff: 0x%016x, 0x%016x, 0x%016x, 0x%016x, 0x%016x, 0x%016x\n", offset, pageoffsetMask, findex, pagenumShift,(offset & pageoffsetMask), (findex << pagenumShift));
   Memory[addr].mInstr = instr;
-  printf("Mem: 0x%08x, Data: 0x%08x  0x%08x  0x%08x\n", addr, Memory[addr], Memory[addr].mInstr, opcodeShift);
+  //printf("Mem: 0x%016x, Data: 0x%016x  0x%016x  0x%016x\n", addr, Memory[addr], Memory[addr].mInstr, opcodeShift);
 }
 
 void direct_put_data (int findex, int offset, mdType data)
 { int addr = (offset & pageoffsetMask) | (findex << pagenumShift);
-  //printf("Address stuff: 0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x\n", offset, pageoffsetMask, findex, pagenumShift,(offset & pageoffsetMask), (findex << pagenumShift));
+  //printf("Address stuff: 0x%016x, 0x%016x, 0x%016x, 0x%016x, 0x%016x, 0x%016x\n", offset, pageoffsetMask, findex, pagenumShift,(offset & pageoffsetMask), (findex << pagenumShift));
   Memory[addr].mData = data;
-  printf("Mem: 0x%08x, Data: 0x%08x 0x%08x\n", addr, Memory[addr], Memory[addr].mData);
+  //printf("Mem: 0x%016x, Data: 0x%016x 0x%016x\n", addr, Memory[addr], Memory[addr].mData);
 }
 
 //==========================================
@@ -201,7 +205,6 @@ void direct_put_data (int findex, int offset, mdType data)
 void dump_one_frame (int findex) // DONE
 {
   // dump the content of one memory frame
-
   int i;
 
   printf("************Dump the content of memory frame %d\n", findex);
@@ -223,14 +226,13 @@ void dump_memory () // DONE
 void dump_free_list () // DONE
 {
   // dump the list of free memory frames
-
   int i = freeFhead;
 
   printf ("*************Dump the list of Free memory Frame\n");
-  while(i < nullIndex){
-    printf ("Free Frame %d: ", i);
+  while(i != nullIndex){
+    printf ("%d ", i);
     i = memFrame[i].next;
-  }
+  } printf("\n");
 }
 
 void print_one_frameinfo (int indx)
@@ -252,6 +254,49 @@ void dump_memoryframe_info ()
   dump_free_list ();
 }
 
+get_pending_page(int pid, int page) {
+	int i=OSpages;
+	while (memFrame[i].pid!=pid) {
+		i++;
+		if (i==maxPpages) { return nullIndex; }
+	}
+	while (memFrame[i].prev != nullIndex) {i = memFrame[i].prev;}//get to first frame of pid
+	while ((i!= nullIndex) && ((memFrame[i].page!=page) || (memFrame[i].pid!=pid))) {i = memFrame[i].next;} //go through memFrames until page is found
+	return i;
+}
+
+int get_next_page(int pid, int page) { //for page table; getting next page when pages aren't contiguous; 
+	int i = page+1;
+	while (i!=maxPpages) {
+		if ((PCB[pid]->PTptr[i]==nullPage) ||  (PCB[pid]->PTptr[i]==diskPage)) {
+			i++;
+		}
+		else if (PCB[pid]->PTptr[i]==pendingPage) { printf("FOUND PENDING PAGE\n");//means memory is allocated, but pointer doesn't specify position
+			return get_pending_page(pid, i);
+		}
+		else {
+			return PCB[pid]->PTptr[i];
+		}
+	}
+	return nullIndex;
+}
+
+int get_prev_page(int pid, int page) {
+	int i = page-1;
+	while (i!=-1) {
+		if ((PCB[pid]->PTptr[i]==nullPage) ||  (PCB[pid]->PTptr[i]==diskPage)) {
+			i=i-1;
+		}
+		else if (PCB[pid]->PTptr[i]==pendingPage) { printf("FOUND PENDING PAGE\n");//means memory is allocated, but pointer doesn't specify position
+			return get_pending_page(pid, i);
+		}
+		else {
+			return PCB[pid]->PTptr[i];
+		}
+	}
+	return nullIndex;
+}
+
 void  update_frame_info (findex, pid, page) // To be checked by Dinidu
 int findex, pid, page; //findex is frame in memory; page is page in page table
 {
@@ -259,30 +304,58 @@ int findex, pid, page; //findex is frame in memory; page is page in page table
   // need this function also becuase loader also needs to update memFrame fields
   // while it is better to not to expose memFrame fields externally
 
-  if (PCB[pid]->PTptr[page] == nullPage) {
-	  //
+  if (PCB[pid]->PTptr[page] == diskPage) {
+	  // for VM
   }
-  PCB[pid]->PTptr[page] = findex;
+  if (memFrame[findex].prev != nullIndex) {
+	  memFrame[memFrame[findex].prev].next = memFrame[findex].next;
+  } 
+  if (memFrame[findex].next != nullIndex) {
+	  memFrame[memFrame[findex].next].prev = memFrame[findex].prev;
+  } 
+  //PCB[pid]->PTptr[page] = findex;
+  memFrame[findex].prev = get_prev_page(pid,page);
+  memFrame[findex].next = get_next_page(pid,page); //used since pages might not bee contiguous
+  if (memFrame[findex].prev>nullIndex) memFrame[memFrame[findex].prev].next = findex; //memframe points to next/prev frame part of same process;
+  if (memFrame[findex].next>nullIndex) memFrame[memFrame[findex].next].prev = findex;
+  /*
   if (page == 0) {
 	  memFrame[findex].prev = nullIndex;
 	  memFrame[findex].next = PCB[pid]->PTptr[page+1];
+	  if (PCB[pid]->PTptr[page+1]!= nullPage) memFrame[PCB[pid]->PTptr[page+1]].prev = findex;
   }
   else if (page == maxPpages-1) {
 	  memFrame[findex].prev = PCB[pid]->PTptr[page-1];
 	  memFrame[findex].next = nullIndex;
+	  if (PCB[pid]->PTptr[page-1]!= nullPage) memFrame[PCB[pid]->PTptr[page-1]].next = findex;
   }
   else {
 	  memFrame[findex].prev = PCB[pid]->PTptr[page-1];
 	  memFrame[findex].next = PCB[pid]->PTptr[page+1];
+	  if (PCB[pid]->PTptr[page-1]<0) memFrame[PCB[pid]->PTptr[page-1]].next = findex;
+	  if (PCB[pid]->PTptr[page+1]<0) memFrame[PCB[pid]->PTptr[page+1]].prev = findex;
   }
-
-
-  memFrame[findex].age = zeroAge;
+  if (( memFrame[findex].next == get_next_page(pid,page) ) && ( memFrame[findex].prev ==  get_prev_page(pid,page) ) ) {
+	  printf("ACCURATE REPRESENTATION ***************************** %d %d \n", memFrame[findex].prev, memFrame[findex].next);
+  } else {
+	  printf("WRONG; Values are %d %d %d %d *****\n",(page+1),get_next_page(pid,page),(page-1),get_prev_page(pid,page));
+  }
+  */
+  
+  memFrame[findex].age = highestAge;
   memFrame[findex].dirty = cleanFrame; //will change for VM
   memFrame[findex].free = usedFrame;
   memFrame[findex].pinned = nopinFrame;
   memFrame[findex].pid = pid;
   memFrame[findex].page = page;
+}
+
+int find_allocated_memory(int pid, int page) {
+	int i;
+	
+	i = get_next_page(pid, -1); //sees if any pages of process already exist in memory
+	while ((i!= nullIndex) && (memFrame[i].page!=page)) {i = memFrame[i].next;} //go through memFrames until page is found
+	return i;
 }
 
 // should write dirty frames to disk and remove them from process page table
@@ -292,11 +365,69 @@ int findex, pid, page; //findex is frame in memory; page is page in page table
 
 
 void addto_free_frame (int findex, int status) // To be done For demand paging
-{
+{   int f;
+
+	memFrame[findex].free = freeFrame;
+	if (status == nullPage) {
+		memFrame[findex].pid = nullIndex;
+		memFrame[findex].page = nullPage;
+		memFrame[findex].dirty = cleanFrame;
+	}
+	if (memFrame[findex].prev != nullIndex) {
+		memFrame[memFrame[findex].prev].next = memFrame[findex].next;
+	} 
+	if (memFrame[findex].next != nullIndex) {
+		memFrame[memFrame[findex].next].prev = memFrame[findex].prev;
+	} 		
+	
+	if (freeFhead == nullIndex) {
+		memFrame[findex].prev = nullIndex;
+		memFrame[findex].next = nullIndex;
+		freeFhead = findex;
+		freeFtail = findex;
+	} else if(findex >freeFtail) {
+		  memFrame[findex].prev=freeFtail;
+		  memFrame[findex].next = nullIndex;
+		  memFrame[freeFtail].next = findex;
+		  freeFtail = findex;
+	  }
+	  else if (findex < freeFhead) {
+		  memFrame[findex].next=freeFhead;
+		  memFrame[findex].prev = nullIndex;
+		  memFrame[freeFhead].prev = findex;
+		  freeFhead = findex;
+	  }
+	  else {
+		f = freeFhead;
+		while (findex>f) {f = memFrame[f].next;}
+		memFrame[findex].prev = memFrame[f].prev;
+		memFrame[findex].next = f;
+		memFrame[memFrame[f].prev].next = findex;
+		memFrame[f].prev = findex;
+	  }
+	if (memFrame[findex].dirty == cleanFrame) {
+		memFrame[findex].pid = nullIndex;
+		memFrame[findex].pid = nullPage;
+	}	
 }
 
 int select_agest_frame ()
 {
+	int i;
+	int frame = nullPage;
+	int lowAge = highestAge;
+	for(i=OSpages; i<numFrames; i++) {
+		if (memFrame[i].free != freeFrame) {
+		if (memFrame[i].age < lowAge) {
+			lowAge = memFrame[i].age;
+			frame = i;
+		}
+		else if ((memFrame[i].age == lowAge) && (memFrame[i].dirty == cleanFrame)) {
+			frame = i;
+		}
+		}
+	}
+	return frame;
   // select a frame with the lowest age
   // if there are multiple frames with the same lowest age, then choose the one
   // that is not dirty
@@ -304,21 +435,44 @@ int select_agest_frame ()
 
 int get_free_frame () // DONE
 {
-  // DG CODE *******************************************************************************************
-  int i, ret;
+  int i, j, p, ret;
   ret =freeFhead;
-	if (freeFhead != nullIndex) {
-		i=freeFhead+1;
-		while ((memFrame[i].free == usedFrame) && (i <= freeFtail)) { i++; }
-		if (i > freeFtail) {
-			freeFhead = nullIndex; freeFtail = nullIndex;
-		}
-		else {
-			freeFhead = i;
-		}
-	}
+  if (freeFhead != nullIndex) {
+	  i=freeFhead+1;
+	  while ((memFrame[i].free == usedFrame) && (i <= freeFtail)) { i++; }
+	  if (i > freeFtail) {
+		  freeFhead = nullIndex; freeFtail = nullIndex;
+	  }
+	  else {
+		freeFhead = i;
+	  }
+  }
+  else { //if ret=nullIndex, meaning no free frames
+	  ret = select_agest_frame ();
+  }
+	  
+  //stuff for get agest frame if ret = nullIndex
+  
+  if (memFrame[ret].dirty == dirtyFrame) { //code 
+	  //mType *buf = (mType *) malloc (pageSize*sizeof(mType));
+	  unsigned *buf = (unsigned *) malloc (pageSize*sizeof(unsigned));
+	  unsigned temp;
+	  for (i=0; i<pageSize; i++) {
+		  //p = memFrame[ret].page;
+		  //if (p*pageSize+i<PCB[memFrame[ret].pid]->dataOffset) { //if getting instruction}
+		  //temp[i] = (unsigned)buf[j].mInstr;
+		  temp = (unsigned)Memory[ret*pageSize+i].mInstr;
+		  buf[i] = temp;
+	  }
+	  //code to get data from memory for dirty frame
+	  insert_swapQ(memFrame[ret].pid,memFrame[ret].page,buf,actWrite,Nothing);
+	  update_process_pagetable (memFrame[ret].pid, memFrame[ret].page, diskPage); //updates page table
+  }
+  if (memFrame[ret].pid != nullIndex) {
+	  update_process_pagetable (memFrame[ret].pid, memFrame[ret].page, diskPage); //updates page table
+  }
+  //
   return ret;
-	// ***************************************************************************************************
 // get a free frame from the head of the free list
 // if there is no free frame, then get one frame with the lowest age
 // this func always returns a frame, either from free list or get one with lowest age
@@ -343,12 +497,10 @@ void initialize_memory () // DONE
     memFrame[i].free = usedFrame;
     memFrame[i].pinned = pinnedFrame;
     memFrame[i].pid = osPid;
+	memFrame[i].page = nullPage;
   }
   // initilize the remaining pages, also put them in free list
-  // *** ADD CODE
 
-  // DG CODE *******************************************************************************************
-  // printf("DEBUG PAGING\n");
   freeFhead = OSpages;
   freeFtail = numFrames - 1;
   for (i=OSpages; i<numFrames; i++)
@@ -372,8 +524,6 @@ void initialize_memory () // DONE
     memFrame[i].pinned = nopinFrame;
     memFrame[i].pid = nullIndex;
   }
-  // ***************************************************************************************************
-
 }
 
 //==========================================
@@ -399,32 +549,14 @@ int pid, page, frame;
 
 int free_process_memory (int pid) // DONE
 { int i, j, k, f; //printf("%d \n", get_free_frame());
-  for (i=0; i<ceil((double)(PCB[pid]->numData+PCB[pid]->numInstr)/(double)pageSize); i++) {
-	  for(j = PCB[pid]->PTptr[i] * pageSize; j < (PCB[pid]->PTptr[i] + 1) * pageSize; j++){
-		printf("Mem: 0x%032x, Data: 0x%016x,  %f\n", j, Memory[j], Memory[j].mData);
-		Memory[j].mInstr=0;
-	  }
-	  k = PCB[pid]->PTptr[i];
-	  memFrame[k].free = freeFrame;
-	  memFrame[k].pid = nullIndex;
-	  memFrame[k].page = nullPage;
-	  if (k >freeFtail) {
-		  memFrame[k].prev=freeFtail;
-		  memFrame[k].next = nullIndex;
-		  memFrame[freeFtail].next = k;
-		  freeFtail = k;
-	  }
-	  else if (k < freeFhead) {
-		  memFrame[k].next=freeFhead;
-		  memFrame[k].prev = nullIndex;
-		  memFrame[freeFhead].prev = k;
-		  freeFhead = k;
-	  }
-	  else {
-		f = freeFhead;
-		while (k>f) {f = memFrame[f].next;}
-		memFrame[k].prev = memFrame[f].prev;
-		memFrame[k].next = f;
+  for (i=0; i<maxPpages; i++) {
+	  if (PCB[pid]->PTptr[i] != nullPage) {
+		  for(j = PCB[pid]->PTptr[i] * pageSize; j < (PCB[pid]->PTptr[i] + 1) * pageSize; j++){
+			printf("Mem: 0x%032x, Data: 0x%016x,  %f\n", j, Memory[j], Memory[j].mData);
+			Memory[j].mInstr=0;
+		  }
+	  
+		  addto_free_frame(PCB[pid]->PTptr[i], nullPage);
 	  }
   }
 
@@ -435,16 +567,20 @@ int free_process_memory (int pid) // DONE
 
 void dump_process_pagetable (int pid) // DONE
 { int i;
-  for (i=0; i<ceil((double)(PCB[pid]->numData+PCB[pid]->numInstr)/(double)pageSize); i++) {
-	  printf("Page %d frame %d \n", i, PCB[pid]->PTptr[i]);
+  for (i=0; i<maxPpages; i++) {
+	  if (PCB[pid]->PTptr[i] >= 0) {
+		  printf("Page %d frame %d \n", i, PCB[pid]->PTptr[i]);
+	  } else if (PCB[pid]->PTptr[i] == diskPage) { printf("Page %d is on disk \n", i);
+	  } else if (PCB[pid]->PTptr[i] == pendingPage) { printf("Page %d is currently being loaded to memory \n", i);
+	  } else printf("Page %d does not exist \n", i);
   }
   // print page table entries of process pid
 }
 
 void dump_process_memory (int pid) // DONE
 { int i;
-  for (i=0; i<ceil((double)(PCB[pid]->numData+PCB[pid]->numInstr)/(double)pageSize); i++) {
-	  dump_one_frame(PCB[pid]->PTptr[i]);
+  for (i=0; i<maxPpages; i++) {
+	  if (PCB[pid]->PTptr[i] != nullPage) dump_one_frame(PCB[pid]->PTptr[i]);
   }
   // print out the memory content for process pid
 }
@@ -458,8 +594,57 @@ void dump_process_memory (int pid) // DONE
 #define actRead 0
 #define actWrite 1
 
+void page_fault_frame_print(int findex) {
+	if (memFrame[findex].free == usedFrame) {
+		printf("There were no free frame available. This was the oldest frame in memory\n");
+	} else if (memFrame[findex].free == freeFrame) {
+		printf("This frame is was a free frame from the free frame list\n");
+	}
+	print_one_frameinfo (findex);
+}
+
 void page_fault_handler () // To be done for Demand Paging
-{
+{ unsigned *temp = (unsigned *) malloc (pageSize*sizeof(unsigned));
+  int pidin = CPU.Pid;
+  int instrPage;
+  int dataPage;
+  int pageIn;
+  int frame;
+  
+  PCB[CPU.Pid]->numPF++; //increase page fault counter
+  
+  instrPage = CPU.PC/pageSize;
+  if (CPU.PTptr[instrPage] == diskPage) {
+	  printf("*** Page Fault has occurred for: process %d page %d ************\n", CPU.Pid, instrPage);
+	  frame = get_free_frame(); page_fault_frame_print(frame);
+	  update_frame_info(frame, CPU.Pid, instrPage);
+	  update_process_pagetable(CPU.Pid, instrPage, pendingPage);
+	  insert_swapQ(pidin, instrPage, temp, actRead, toReady);
+  }
+  else if (CPU.PTptr[instrPage] == pendingPage) {
+	  printf("*** Page Fault has occurred for: process %d page %d ************\n", CPU.Pid, instrPage);
+	  // don't do anything; already handled
+  }
+  else { //instruction memory is fine
+	  dataPage = (CPU.dataOffset + CPU.IRoperand) / pageSize;
+	  printf("*** Page Fault has occurred for: process %d page %d ************\n", CPU.Pid, dataPage);
+	  if (CPU.PTptr[dataPage] == diskPage) {
+		  frame = get_free_frame(); page_fault_frame_print(frame);
+		  update_frame_info(frame, CPU.Pid, dataPage);
+		  update_process_pagetable(CPU.Pid, dataPage, pendingPage);
+		  insert_swapQ(pidin, dataPage, temp, actRead, toReady);
+	  }
+	  else if (CPU.PTptr[dataPage] == pendingPage) {
+		  // don't do anything; already handled
+	  }
+	  else {
+		  printf("INCORRECT PAGE FAULT RAISED! PAGES ARE IN MEMORY!\n");
+	  }
+  }
+  print_one_frameinfo (frame);
+  
+  
+  
   // handle page fault
   // obtain a free frame or get a frame with the lowest age
   // if the frame is dirty, insert a write request to swapQ
@@ -472,13 +657,23 @@ void page_fault_handler () // To be done for Demand Paging
 
 void memory_agescan () // To be done for Demand Paging
 {
+    int i;
+      for(i=OSpages; i<numFrames; i++)
+        {
+          if(memFrame[i].age!=0) {
+			//printf("OLD AGE: 0x%016x %d \t",memFrame[i].age,memFrame[i].age); 
+			memFrame[i].age=memFrame[i].age>>1; 
+			//printf("NEW AGE: 0x%016x %d\n", memFrame[i].age,memFrame[i].age); 
+		  }
+		  if ((memFrame[i].age==0) && (memFrame[i].free != freeFrame)) {
+			  addto_free_frame (i, memFrame[i].dirty);
+		  }
+        }
 }
 
 void initialize_memory_manager () // DONE
 {
-  // DG CODE *******************************************************************************************
   initialize_memory();
-  // ***************************************************************************************************	
   // initialize memory and add page scan event request
 }
 

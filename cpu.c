@@ -58,7 +58,20 @@ void handle_interrupt ()
     { if (CPU.exeStatus == eRun) CPU.exeStatus = eReady;
       clear_interrupt (tqInterrupt);
     }
-    // *** ADD CODE to handle page fault and periodical age scan // For DemandPaging
+
+    // CODE to handle page fault and periodical age scan For DemandPaging //**RC*/
+
+	if ((CPU.interruptV & pFaultException)==pFaultException) {
+		CPU.exeStatus == ePFault;
+		page_fault_handler();
+		clear_interrupt (pFaultException);
+	}
+
+	if ((CPU.interruptV & ageInterrupt) == ageInterrupt) {
+        memory_agescan ();
+		clear_interrupt (ageInterrupt);
+	}
+
   }
 }
 
@@ -73,7 +86,7 @@ void fetch_instruction ()
     if (CPU.IRopcode != OPend && CPU.IRopcode != OPsleep
         && CPU.IRopcode != OPstore)
     { mret = get_data (CPU.IRoperand);
-      if (mret == mError) CPU.exeStatus = eError;
+      if (mret == mError) {CPU.exeStatus = eError; }
       else if (mret == mPFault) CPU.exeStatus = ePFault;
       else if (CPU.IRopcode == OPifgo)
       { mret = get_instruction (CPU.PC+1);
@@ -170,7 +183,11 @@ void cpu_execution ()
         // no other instruction will cause problem and execution is done
       if (Debug) { printf ("Executed: "); dump_registers (); }
     }
-
+	
+	if (CPU.exeStatus == ePFault) {
+		set_interrupt(pFaultException);
+	}
+	
     if (CPU.interruptV != 0) handle_interrupt ();
     advance_clock ();
       // since we don't have clock, we use instruction cycle as the clock

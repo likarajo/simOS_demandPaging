@@ -149,6 +149,7 @@ void start_terminal ()
 
 void end_terminal ()
 { int ret;
+  sem_post(&term_semaq); sem_post(&term_mutex); //**DG
 
   fclose (fterm);
   ret = pthread_join (termThread, NULL);

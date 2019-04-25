@@ -6,6 +6,8 @@ void process_admin_command ()
 { char action[10];
   char fname[100];
   int round, i;
+  genericPtr ageCheck;
+  ageCheck = add_timer (periodAgeScan, CPU.Pid, ageInterrupt, periodAgeScan);
 
   while (systemActive)
   { printf ("command> ");

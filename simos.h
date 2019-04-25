@@ -92,10 +92,7 @@ void initialize_memory_manager ();   // called by system.c
 struct
 { int Pid;
   int PC;
-  int numInstr; // added
-  int numData; // added
-  int dataOffset; // added
-  int Mbound; // added
+  int dataOffset;
   mdType AC;
   mdType MBR;
   int IRopcode;
@@ -130,7 +127,7 @@ struct
 void initialize_cpu ();  // called by system.c
 void cpu_execution ();   // called by process.c
 
-void set_interrupt (unsigned bit);
+void set_interrupt (unsigned bit);  
      // called by clock.c for tqInterrup, memory.c  for ageInterrupt
      // called by clock.c for endWaitInterrupt (sleep)
      // called by term.c for endWaitInterrupt (termio)
@@ -142,10 +139,7 @@ void set_interrupt (unsigned bit);
 typedef struct
 { int Pid;
   int PC;
-  int numInstr; // added
-  int numData; // added
-  int dataOffset; // added
-  int Mbound; // added
+  int dataOffset;
   mdType AC;
   int *PTptr;
   int exeStatus;
